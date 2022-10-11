@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS file_info (
   KEY `name_idx` (`name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE IF NOT EXISTS event_sync (
+CREATE TABLE IF NOT EXISTS file_event_sync (
   `id` int NOT NULL AUTO_INCREMENT,
   `event_id` int NOT NULL DEFAULT '0' COMMENT 'event id',
   `sync_status` varchar(10) NOT NULL DEFAULT 'FETCHED' COMMENT 'sync status: FETCHED, ACKED',

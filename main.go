@@ -15,7 +15,7 @@ func main() {
 	config.InitRedisFromConfig(&conf.RedisConf)
 
 	// register jobs
-	s := util.ScheduleCron("0/5 * * * * *", func() {
+	s := util.ScheduleCron("0/3 * * * * *", func() {
 		domain.SyncFileInfoEvents()
 	})
 	s.StartBlocking()
