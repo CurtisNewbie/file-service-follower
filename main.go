@@ -1,31 +1,22 @@
 package main
 
 import (
-	"github.com/curtisnewbie/gocommon/web/server"
-	"github.com/gin-gonic/gin"
-
+	"github.com/curtisnewbie/file-service-follower/domain"
 	"github.com/curtisnewbie/gocommon/config"
+	"github.com/curtisnewbie/gocommon/util"
 )
 
 func main() {
 
-	profile, conf := config.DefaultParseProfConf()
-
+	_, conf := config.DefaultParseProfConf()
 	if err := config.InitDBFromConfig(&conf.DBConf); err != nil {
 		panic(err)
 	}
 	config.InitRedisFromConfig(&conf.RedisConf)
 
 	// register jobs
-	// s := util.ScheduleCron("0 0/10 * * * *", data.CleanUpDeletedGallery)
-	// s.StartAsync()
-
-	isProd := config.IsProd(profile)
-	err := server.BootstrapServer(&conf.ServerConf, isProd, func(router *gin.Engine) {
-		// TODO
+	s := util.ScheduleCron("0/5 * * * * *", func() {
+		domain.SyncFileInfoEvents()
 	})
-	if err != nil {
-		panic(err)
-	}
-
+	s.StartBlocking()
 }

@@ -1,0 +1,41 @@
+CREATE TABLE IF NOT EXISTS file_info (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `name` varchar(255) NOT NULL COMMENT 'name of the file',
+  `uuid` varchar(64) NOT NULL COMMENT 'file''s uuid',
+  `is_logic_deleted` int NOT NULL DEFAULT '0' COMMENT 'whether the file is logically deleted, 0-normal, 1-deleted',
+  `is_physic_deleted` int NOT NULL DEFAULT '0' COMMENT 'whether the file is physically deleted, 0-normal, 1-deleted',
+  `size_in_bytes` bigint NOT NULL COMMENT 'size of file in bytes',
+  `uploader_id` int NOT NULL DEFAULT '0' COMMENT 'uploader id, i.e., user.id',
+  `uploader_name` varchar(255) NOT NULL DEFAULT '' COMMENT 'uploader name',
+  `upload_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'upload time',
+  `logic_delete_time` datetime DEFAULT NULL COMMENT 'when the file is logically deleted',
+  `physic_delete_time` datetime DEFAULT NULL COMMENT 'when the file is physically deleted',
+  `user_group` int NOT NULL COMMENT 'the group that the file belongs to, 0-public, 1-private',
+  `fs_group_id` int NOT NULL DEFAULT '0' COMMENT 'id of fs_group',
+  `create_time` timestamp NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'when the record is created',
+  `create_by` varchar(255) NOT NULL DEFAULT '' COMMENT 'who created this record',
+  `update_time` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'when the record is updated',
+  `update_by` varchar(255) NOT NULL DEFAULT '' COMMENT 'who updated this record',
+  `is_del` tinyint NOT NULL DEFAULT '0' COMMENT '0-normal, 1-deleted',
+  `file_type` varchar(6) NOT NULL DEFAULT 'FILE' COMMENT 'file type: FILE, DIR',
+  `parent_file` varchar(64) NOT NULL DEFAULT '' COMMENT 'parent file uuid',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uuid_uk` (`uuid`),
+  KEY `parent_file_idx` (`parent_file`),
+  KEY `name_idx` (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS event_sync (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `event_id` int NOT NULL DEFAULT '0' COMMENT 'event id',
+  `sync_status` varchar(10) NOT NULL DEFAULT 'FETCHED' COMMENT 'sync status: FETCHED, ACKED',
+  `fetch_time`  timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'when the event is fetched',
+  `ack_time`  timestamp NULL DEFAULT NULL COMMENT 'when the event is acked',
+  `create_time` timestamp NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'when the record is created',
+  `create_by` varchar(255) NOT NULL DEFAULT '' COMMENT 'who created this record',
+  `update_time` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'when the record is updated',
+  `update_by` varchar(255) NOT NULL DEFAULT '' COMMENT 'who updated this record',
+  `is_del` tinyint NOT NULL DEFAULT '0' COMMENT '0-normal, 1-deleted',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `event_id_uk` (`event_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Event synchronization and acknowledgement';
