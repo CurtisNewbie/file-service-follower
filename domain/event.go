@@ -55,7 +55,7 @@ type FileEventSync struct {
 }
 
 // find last eventId
-func FindLastEventId() (*int32, error) {
+func FindLastEventId() (int32, error) {
 	tx := mysql.GetDB()
 
 	// 0 is the default value, it's also the first eventId used when we don't have any
@@ -66,10 +66,10 @@ func FindLastEventId() (*int32, error) {
 	limit 1`).Scan(&eventId)
 
 	if t.Error != nil {
-		return nil, t.Error
+		return 0, t.Error
 	}
 
-	return &eventId, nil
+	return eventId, nil
 }
 
 // find last fetched eventId
@@ -103,25 +103,25 @@ func ReAckEvent(eventId *int32) error {
 }
 
 // ack the event
-func AckEvent(eventId *int32) error {
+func AckEvent(eventId int32) error {
 	// TODO impl this
 	return nil
 }
 
 // fetch event detail
-func FetchEventDetail(eventId *int32) (*FileEvent, error) {
+func FetchEventDetail(eventId int32) (*FileEvent, error) {
 	// TODO impl this
 	return nil, nil
 }
 
 // fetch eventIds after the lastEventId
-func FetchEventIdsAfter(lastEventId *int32) ([]int32, error) {
+func FetchEventIdsAfter(lastEventId int32) ([]int32, error) {
 	// TODO impl this
 	return nil, nil
 }
 
 // apply the FileEvent
-func ApplyFileEvent(eventId *int32, fileEvent *FileEvent) error {
+func ApplyFileEvent(eventId int32, fileEvent *FileEvent) error {
 	// TODO impl this
 	return nil
 }
@@ -161,7 +161,7 @@ func SyncFileInfoEvents() {
 			logrus.Errorf("Failed to find last eventId, %v", err)
 			return nil
 		}
-		logrus.Infof("Last eventId: %d, tries to fetch more", *lastEventId)
+		logrus.Infof("Last eventId: %d, tries to fetch more", lastEventId)
 
 		// keep fetching until we got all of them
 		for {
@@ -169,7 +169,7 @@ func SyncFileInfoEvents() {
 			// request more events from file-server, file-server may response list of eventIds after the lastEventId we have here
 			newEventIds, err := FetchEventIdsAfter(lastEventId)
 			if err != nil {
-				logrus.Errorf("Failed to FetchEventIdsAfter, lastEventId: %d, %v", *lastEventId, err)
+				logrus.Errorf("Failed to FetchEventIdsAfter, lastEventId: %d, %v", lastEventId, err)
 				return nil
 			}
 
@@ -182,7 +182,7 @@ func SyncFileInfoEvents() {
 			for _, i := range newEventIds {
 				var cei int32 = newEventIds[i]
 				logrus.Infof("Fetching detail of eventId: %d", cei)
-				fileEvent, err := FetchEventDetail(&cei)
+				fileEvent, err := FetchEventDetail(cei)
 				if err != nil {
 					logrus.Errorf("Failed to FetchEventDetail, eventId: %d, %v", cei, err)
 					return nil
@@ -190,14 +190,14 @@ func SyncFileInfoEvents() {
 
 				if fileEvent != nil {
 					// apply the file event, repeatable action
-					err = ApplyFileEvent(&cei, fileEvent)
+					err = ApplyFileEvent(cei, fileEvent)
 					if err != nil {
 						logrus.Errorf("Failed to ApplyFileEvent, eventId: %d, %v", cei, err)
 						return nil
 					}
 
 					// the event has been applied, we now ack it, repeatable action
-					err = AckEvent(&cei)
+					err = AckEvent(cei)
 					if err != nil {
 						logrus.Errorf("Failed to AckEvent, eventId: %d, %v", cei, err)
 						return nil
