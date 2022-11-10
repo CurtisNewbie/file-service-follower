@@ -15,24 +15,31 @@ type ESStatus string
 type EventType string
 
 const (
+	// event is fetched, but not acked
 	ES_FETCHED ESStatus = "FETCHED"
-	ES_ACKED   ESStatus = "ACKED"
 
-	ET_FILE_ADDED   EventType = "FILE_ADDED"
+	// event is fetched and acked
+	ES_ACKED ESStatus = "ACKED"
+
+	// EventType: file added
+	ET_FILE_ADDED EventType = "FILE_ADDED"
+	// EventType: file deleted
 	ET_FILE_DELETED EventType = "FILE_DELETED"
+	// EventType: file updated
 	ET_FILE_UPDATED EventType = "FILE_UPDATED"
 
+	// limit of eventIds fetched
 	FETCH_LIMIT int = 30
 )
 
+// file event
 type FileEvent struct {
 	EventId    *int32
 	CreateTime *time.Time
 	Type       *EventType
-	Data       *FileInfo
 }
 
-// Event synchronization and acknowledgement
+// file event synchronization and acknowledgement
 type FileEventSync struct {
 	ID         *int32
 	EventId    *int32
@@ -156,7 +163,7 @@ func SyncFileInfoEvents() {
 	// keep fetching until we got all of them
 	for {
 
-		// Request more events from file-server, file-server may response list of eventIds after the lastEventId we have here
+		// request more events from file-server, file-server may response list of eventIds after the lastEventId we have here
 		newEventIds, err := FetchEventIdsAfter(lastEventId)
 		if err != nil {
 			logrus.Errorf("Failed to FetchEventIdsAfter, lastEventId: %d, %v", *lastEventId, err)
@@ -168,7 +175,7 @@ func SyncFileInfoEvents() {
 			return
 		}
 
-		// Based on the list of eventIds we got, we request detail for each of these eventId, and we apply them one by one
+		// based on the list of eventIds we got, we request detail for each of these eventId, and we apply them one by one
 		for _, i := range newEventIds {
 			var cei int32 = newEventIds[i]
 			logrus.Infof("Fetching detail of eventId: %d", cei)
@@ -186,7 +193,7 @@ func SyncFileInfoEvents() {
 					return
 				}
 
-				// the event has been applied, we now ack it
+				// the event has been applied, we now ack it, repeatable action
 				err = AckEvent(&cei)
 				if err != nil {
 					logrus.Errorf("Failed to AckEvent, eventId: %d, %v", cei, err)
