@@ -3,8 +3,9 @@ package domain
 import (
 	"time"
 
-	"github.com/curtisnewbie/gocommon/config"
 	"github.com/curtisnewbie/gocommon/dao"
+	"github.com/curtisnewbie/gocommon/mysql"
+	"github.com/curtisnewbie/gocommon/redis"
 	"github.com/sirupsen/logrus"
 )
 
@@ -55,7 +56,7 @@ type FileEventSync struct {
 
 // find last eventId
 func FindLastEventId() (*int32, error) {
-	tx := config.GetDB()
+	tx := mysql.GetDB()
 
 	// 0 is the default value, it's also the first eventId used when we don't have any
 	var eventId int32
@@ -73,7 +74,7 @@ func FindLastEventId() (*int32, error) {
 
 // find last fetched eventId
 func FindLastNonAckedEventId() (*int32, error) {
-	tx := config.GetDB()
+	tx := mysql.GetDB()
 
 	// 0 is the default value, it's also the first eventId used when we don't have any
 	var eventId int32
@@ -127,79 +128,82 @@ func ApplyFileEvent(eventId *int32, fileEvent *FileEvent) error {
 
 // sync file events, events must be sync in order one by one, if any failed, we start it over unless the last event is acked
 func SyncFileInfoEvents() {
-	/*
-		try to find the last eventId that is not acked for whatever reason,
-		there should be at most one event that is not acked, we make sure
-		that it's correctly applied before we ack it and fetch more events
-	*/
-	var err error = nil
-	lastNonAckedEventId, err := FindLastNonAckedEventId()
-	if err != nil {
-		logrus.Errorf("Failed to FindLastNonAckedEventId, eventId: %d, %v", *lastNonAckedEventId, err)
-		return
-	}
-	if lastNonAckedEventId != nil {
-		// try to verify and re-ack the event
-		err = ReAckEvent(lastNonAckedEventId)
+
+	redis.LockRun("fsf:sync", func() any {
+		/*
+			try to find the last eventId that is not acked for whatever reason,
+			there should be at most one event that is not acked, we make sure
+			that it's correctly applied before we ack it and fetch more events
+		*/
+		var err error = nil
+		lastNonAckedEventId, err := FindLastNonAckedEventId()
 		if err != nil {
-			logrus.Errorf("Failed to ReAckEvent, eventId: %d, %v", *lastNonAckedEventId, err)
-			return
+			logrus.Errorf("Failed to FindLastNonAckedEventId, eventId: %d, %v", *lastNonAckedEventId, err)
+			return nil
 		}
-	} else {
-		logrus.Infof("No non-acked eventId found")
-	}
-
-	/*
-		try to find the last eventId, we use it as an offset to fetch more eventIds after it,
-		by default it's 0, and file-server should recognize it.
-	*/
-	lastEventId, err := FindLastEventId()
-	if err != nil {
-		logrus.Errorf("Failed to find last eventId, %v", err)
-		return
-	}
-	logrus.Infof("Last eventId: %d, tries to fetch more", *lastEventId)
-
-	// keep fetching until we got all of them
-	for {
-
-		// request more events from file-server, file-server may response list of eventIds after the lastEventId we have here
-		newEventIds, err := FetchEventIdsAfter(lastEventId)
-		if err != nil {
-			logrus.Errorf("Failed to FetchEventIdsAfter, lastEventId: %d, %v", *lastEventId, err)
-			return
-		}
-
-		// no more new events
-		if newEventIds == nil || len(newEventIds) < 1 {
-			return
-		}
-
-		// based on the list of eventIds we got, we request detail for each of these eventId, and we apply them one by one
-		for _, i := range newEventIds {
-			var cei int32 = newEventIds[i]
-			logrus.Infof("Fetching detail of eventId: %d", cei)
-			fileEvent, err := FetchEventDetail(&cei)
+		if lastNonAckedEventId != nil {
+			// try to verify and re-ack the event
+			err = ReAckEvent(lastNonAckedEventId)
 			if err != nil {
-				logrus.Errorf("Failed to FetchEventDetail, eventId: %d, %v", cei, err)
-				return
+				logrus.Errorf("Failed to ReAckEvent, eventId: %d, %v", *lastNonAckedEventId, err)
+				return nil
+			}
+		} else {
+			logrus.Infof("No non-acked eventId found")
+		}
+
+		/*
+			try to find the last eventId, we use it as an offset to fetch more eventIds after it,
+			by default it's 0, and file-server should recognize it.
+		*/
+		lastEventId, err := FindLastEventId()
+		if err != nil {
+			logrus.Errorf("Failed to find last eventId, %v", err)
+			return nil
+		}
+		logrus.Infof("Last eventId: %d, tries to fetch more", *lastEventId)
+
+		// keep fetching until we got all of them
+		for {
+
+			// request more events from file-server, file-server may response list of eventIds after the lastEventId we have here
+			newEventIds, err := FetchEventIdsAfter(lastEventId)
+			if err != nil {
+				logrus.Errorf("Failed to FetchEventIdsAfter, lastEventId: %d, %v", *lastEventId, err)
+				return nil
 			}
 
-			if fileEvent != nil {
-				// apply the file event, repeatable action
-				err = ApplyFileEvent(&cei, fileEvent)
+			// no more new events
+			if newEventIds == nil || len(newEventIds) < 1 {
+				return nil
+			}
+
+			// based on the list of eventIds we got, we request detail for each of these eventId, and we apply them one by one
+			for _, i := range newEventIds {
+				var cei int32 = newEventIds[i]
+				logrus.Infof("Fetching detail of eventId: %d", cei)
+				fileEvent, err := FetchEventDetail(&cei)
 				if err != nil {
-					logrus.Errorf("Failed to ApplyFileEvent, eventId: %d, %v", cei, err)
-					return
+					logrus.Errorf("Failed to FetchEventDetail, eventId: %d, %v", cei, err)
+					return nil
 				}
 
-				// the event has been applied, we now ack it, repeatable action
-				err = AckEvent(&cei)
-				if err != nil {
-					logrus.Errorf("Failed to AckEvent, eventId: %d, %v", cei, err)
-					return
+				if fileEvent != nil {
+					// apply the file event, repeatable action
+					err = ApplyFileEvent(&cei, fileEvent)
+					if err != nil {
+						logrus.Errorf("Failed to ApplyFileEvent, eventId: %d, %v", cei, err)
+						return nil
+					}
+
+					// the event has been applied, we now ack it, repeatable action
+					err = AckEvent(&cei)
+					if err != nil {
+						logrus.Errorf("Failed to AckEvent, eventId: %d, %v", cei, err)
+						return nil
+					}
 				}
 			}
 		}
-	}
+	})
 }

@@ -1,19 +1,23 @@
 {
   "db": {
+    "enabled": true,
     "user": "root",
     "database": "file_service_follower",
     "host": "localhost",
     "port": "3306"
   },
   "redis": {
+    "enabled": true,
     "address": "localhost",
     "port": "6379",
     "username": "",
     "password": "",
     "database": 0
   },
-  "server": {
-    "host": "localhost",
-    "port": "8084"
+  "file": {
+    "base": "fsf-base"
+  },
+  "client": {
+    "fileServiceUrl": "http://localhost:8080"
   }
 }
