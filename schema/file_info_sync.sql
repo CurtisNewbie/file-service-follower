@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS file_info (
   UNIQUE KEY `uuid_uk` (`uuid`),
   KEY `parent_file_idx` (`parent_file`),
   KEY `name_idx` (`name`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS file_event_sync (
   `id` int NOT NULL AUTO_INCREMENT,
@@ -38,4 +38,4 @@ CREATE TABLE IF NOT EXISTS file_event_sync (
   `is_del` tinyint NOT NULL DEFAULT '0' COMMENT '0-normal, 1-deleted',
   PRIMARY KEY (`id`),
   UNIQUE KEY `event_id_uk` (`event_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Event synchronization and acknowledgement';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Event synchronization and acknowledgement';

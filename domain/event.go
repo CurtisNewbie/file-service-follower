@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"sync"
 	"time"
 
 	"github.com/curtisnewbie/gocommon/dao"
@@ -14,6 +15,16 @@ type ESStatus string
 
 // event type
 type EventType string
+
+// app mode (server / standalone)
+//
+// if server mode is selected, then redis must be deployed for distributed locking
+// if standalone mode is selected, then it will simply used mutex lock for syncing
+type AppMode string
+
+var (
+	syncFileInfoEventsMutex sync.Mutex
+)
 
 const (
 	// event is fetched, but not acked
@@ -31,6 +42,9 @@ const (
 
 	// limit of eventIds fetched
 	FETCH_LIMIT int = 30
+
+	AM_STANDALONE AppMode = "STANDALONE"
+	AM_CLUSTER    AppMode = "CLUSTER"
 )
 
 // file event
@@ -126,84 +140,100 @@ func ApplyFileEvent(eventId int32, fileEvent *FileEvent) error {
 	return nil
 }
 
+// same as doSyncFileInfoEvents(), except that we wrap it with a lock
+func _syncFileInfoEventsInLock(syncFunc func(), mode AppMode) {
+	if mode == AM_STANDALONE {
+		syncFileInfoEventsMutex.Lock()
+		defer syncFileInfoEventsMutex.Unlock()
+		syncFunc()
+	} else {
+		redis.LockRun("fsf:sync", func() any {
+			syncFunc()
+			return nil
+		})
+	}
+}
+
 // sync file events, events must be sync in order one by one, if any failed, we start it over unless the last event is acked
-func SyncFileInfoEvents() {
+func SyncFileInfoEvents(mode AppMode) {
+	_syncFileInfoEventsInLock(_doSyncFileInfoEvents, mode)
+}
 
-	redis.LockRun("fsf:sync", func() any {
-		/*
-			try to find the last eventId that is not acked for whatever reason,
-			there should be at most one event that is not acked, we make sure
-			that it's correctly applied before we ack it and fetch more events
-		*/
-		var err error = nil
-		lastNonAckedEventId, err := FindLastNonAckedEventId()
+// sync file events, events must be sync in order one by one, if any failed, we start it over unless the last event is acked
+func _doSyncFileInfoEvents() {
+	/*
+		try to find the last eventId that is not acked for whatever reason,
+		there should be at most one event that is not acked, we make sure
+		that it's correctly applied before we ack it and fetch more events
+	*/
+	var err error = nil
+	lastNonAckedEventId, err := FindLastNonAckedEventId()
+	if err != nil {
+		logrus.Errorf("Failed to FindLastNonAckedEventId, eventId: %d, %v", *lastNonAckedEventId, err)
+		return
+	}
+	if lastNonAckedEventId != nil {
+		// try to verify and re-ack the event
+		err = ReAckEvent(lastNonAckedEventId)
 		if err != nil {
-			logrus.Errorf("Failed to FindLastNonAckedEventId, eventId: %d, %v", *lastNonAckedEventId, err)
-			return nil
+			logrus.Errorf("Failed to ReAckEvent, eventId: %d, %v", *lastNonAckedEventId, err)
+			return
 		}
-		if lastNonAckedEventId != nil {
-			// try to verify and re-ack the event
-			err = ReAckEvent(lastNonAckedEventId)
-			if err != nil {
-				logrus.Errorf("Failed to ReAckEvent, eventId: %d, %v", *lastNonAckedEventId, err)
-				return nil
-			}
-		} else {
-			logrus.Infof("No non-acked eventId found")
-		}
+	} else {
+		logrus.Infof("No non-acked eventId found")
+	}
 
-		/*
-			try to find the last eventId, we use it as an offset to fetch more eventIds after it,
-			by default it's 0, and file-server should recognize it.
-		*/
-		lastEventId, err := FindLastEventId()
+	/*
+		try to find the last eventId, we use it as an offset to fetch more eventIds after it,
+		by default it's 0, and file-server should recognize it.
+	*/
+	lastEventId, err := FindLastEventId()
+	if err != nil {
+		logrus.Errorf("Failed to find last eventId, %v", err)
+		return
+	}
+	logrus.Infof("Last eventId: %d, tries to fetch more", lastEventId)
+
+	// keep fetching until we got all of them
+	for {
+
+		// request more events from file-server, file-server may response list of eventIds after the lastEventId we have here
+		newEventIds, err := FetchEventIdsAfter(lastEventId)
 		if err != nil {
-			logrus.Errorf("Failed to find last eventId, %v", err)
-			return nil
+			logrus.Errorf("Failed to FetchEventIdsAfter, lastEventId: %d, %v", lastEventId, err)
+			return
 		}
-		logrus.Infof("Last eventId: %d, tries to fetch more", lastEventId)
 
-		// keep fetching until we got all of them
-		for {
+		// no more new events
+		if newEventIds == nil || len(newEventIds) < 1 {
+			return
+		}
 
-			// request more events from file-server, file-server may response list of eventIds after the lastEventId we have here
-			newEventIds, err := FetchEventIdsAfter(lastEventId)
+		// based on the list of eventIds we got, we request detail for each of these eventId, and we apply them one by one
+		for _, i := range newEventIds {
+			var cei int32 = newEventIds[i]
+			logrus.Infof("Fetching detail of eventId: %d", cei)
+			fileEvent, err := FetchEventDetail(cei)
 			if err != nil {
-				logrus.Errorf("Failed to FetchEventIdsAfter, lastEventId: %d, %v", lastEventId, err)
-				return nil
+				logrus.Errorf("Failed to FetchEventDetail, eventId: %d, %v", cei, err)
+				return
 			}
 
-			// no more new events
-			if newEventIds == nil || len(newEventIds) < 1 {
-				return nil
-			}
-
-			// based on the list of eventIds we got, we request detail for each of these eventId, and we apply them one by one
-			for _, i := range newEventIds {
-				var cei int32 = newEventIds[i]
-				logrus.Infof("Fetching detail of eventId: %d", cei)
-				fileEvent, err := FetchEventDetail(cei)
+			if fileEvent != nil {
+				// apply the file event, repeatable action
+				err = ApplyFileEvent(cei, fileEvent)
 				if err != nil {
-					logrus.Errorf("Failed to FetchEventDetail, eventId: %d, %v", cei, err)
-					return nil
+					logrus.Errorf("Failed to ApplyFileEvent, eventId: %d, %v", cei, err)
+					return
 				}
 
-				if fileEvent != nil {
-					// apply the file event, repeatable action
-					err = ApplyFileEvent(cei, fileEvent)
-					if err != nil {
-						logrus.Errorf("Failed to ApplyFileEvent, eventId: %d, %v", cei, err)
-						return nil
-					}
-
-					// the event has been applied, we now ack it, repeatable action
-					err = AckEvent(cei)
-					if err != nil {
-						logrus.Errorf("Failed to AckEvent, eventId: %d, %v", cei, err)
-						return nil
-					}
+				// the event has been applied, we now ack it, repeatable action
+				err = AckEvent(cei)
+				if err != nil {
+					logrus.Errorf("Failed to AckEvent, eventId: %d, %v", cei, err)
+					return
 				}
 			}
 		}
-	})
+	}
 }
