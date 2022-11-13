@@ -4,21 +4,19 @@ import (
 	"os"
 
 	"github.com/curtisnewbie/file-service-follower/domain"
-	"github.com/curtisnewbie/gocommon/config"
-	"github.com/curtisnewbie/gocommon/mysql"
-	"github.com/curtisnewbie/gocommon/util"
+	"github.com/curtisnewbie/gocommon"
 )
 
 func main() {
-
 	// TODO: make this configurable
 	// for now, it's by default standalone mode
 	mode := domain.AM_STANDALONE
 
-	_, conf := config.DefaultParseProfConf(os.Args)
-	if err := mysql.InitDBFromConfig(conf.DBConf); err != nil { panic(err) }
+	gocommon.DefaultReadConfig(os.Args)
+	if e := domain.InitSchema(); e != nil {
+		panic(e)
+	}
 
-	s := util.ScheduleCron("0/3 * * * * *", func() { domain.SyncFileInfoEvents(mode) })
-
+	s := gocommon.ScheduleCron("0/3 * * * * *", func() { domain.SyncFileInfoEvents(mode) })
 	s.StartBlocking()
 }

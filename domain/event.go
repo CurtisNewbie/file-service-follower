@@ -4,21 +4,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/curtisnewbie/gocommon/dao"
-	"github.com/curtisnewbie/gocommon/mysql"
-	"github.com/curtisnewbie/gocommon/redis"
+	"github.com/curtisnewbie/file-service-follower/client"
+	"github.com/curtisnewbie/gocommon"
 	"github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 )
 
 // event sync status
 type ESStatus string
 
-// event type
-type EventType string
-
 // app mode (server / standalone)
 //
 // if server mode is selected, then redis must be deployed for distributed locking
+//
 // if standalone mode is selected, then it will simply used mutex lock for syncing
 type AppMode string
 
@@ -27,57 +25,70 @@ var (
 )
 
 const (
+
+	/*
+		--------------------------------
+
+		Event Sync Status
+
+		--------------------------------
+	*/
+
 	// event is fetched, but not acked
 	ES_FETCHED ESStatus = "FETCHED"
 
 	// event is fetched and acked
 	ES_ACKED ESStatus = "ACKED"
 
-	// EventType: file added
-	ET_FILE_ADDED EventType = "FILE_ADDED"
-	// EventType: file deleted
-	ET_FILE_DELETED EventType = "FILE_DELETED"
-	// EventType: file updated
-	ET_FILE_UPDATED EventType = "FILE_UPDATED"
-
 	// limit of eventIds fetched
 	FETCH_LIMIT int = 30
 
-	AM_STANDALONE AppMode = "STANDALONE"
-	AM_CLUSTER    AppMode = "CLUSTER"
-)
+	/*
+		--------------------------------
 
-// file event
-type FileEvent struct {
-	EventId    *int32
-	CreateTime *time.Time
-	Type       *EventType
-}
+		App Mode
+
+		--------------------------------
+	*/
+
+	// AppMode: standalone mode
+	AM_STANDALONE AppMode = "STANDALONE"
+
+	// AppMode: cluster mode
+	AM_CLUSTER AppMode = "CLUSTER"
+)
 
 // file event synchronization and acknowledgement
 type FileEventSync struct {
-	ID         *int32
-	EventId    *int32
-	SyncStatus *ESStatus
-	FetchTime  *time.Time
-	AckTime    *time.Time
-	CreateTime *time.Time
-	CreateBy   *string
-	UpdateTime *time.Time
-	UpdateBy   *string
-	IsDel      *dao.IS_DEL
+	Id         int
+	EventId    int
+	FileKey    string
+	SyncStatus ESStatus
+	FetchTime  time.Time
+	AckTime    time.Time
+	CreateTime time.Time
+	CreateBy   string
+	UpdateTime time.Time
+	UpdateBy   string
+	IsDel      gocommon.IS_DEL
 }
 
-// find last eventId
-func FindLastEventId() (int32, error) {
-	tx := mysql.GetDB()
+func (fes FileEventSync) isZero() bool {
+	return fes.Id < 1
+}
+
+// find last eventId, if none is found, 0 is returned
+func FindLastEventId() (int, error) {
+	tx := gocommon.GetSqlite()
 
 	// 0 is the default value, it's also the first eventId used when we don't have any
-	var eventId int32
+	var eventId int
 
-	t := tx.Raw(`select event_id from file_event_sync 
-	order by event_id desc 
-	limit 1`).Scan(&eventId)
+	t := tx.Raw(`
+	SELECT event_id FROM file_event_sync 
+	ORDER BY event_id DESC 
+	LIMIT 1
+	`).Scan(&eventId)
 
 	if t.Error != nil {
 		return 0, t.Error
@@ -86,56 +97,50 @@ func FindLastEventId() (int32, error) {
 	return eventId, nil
 }
 
-// find last fetched eventId
-func FindLastNonAckedEventId() (*int32, error) {
-	tx := mysql.GetDB()
+// find last fetched eventId, if none is found, -1is returned
+func FindLastNonAckedEventId() (int, error) {
+	tx := gocommon.GetSqlite()
 
-	// 0 is the default value, it's also the first eventId used when we don't have any
-	var eventId int32
+	eventId := -1
 
-	t := tx.Raw(`select event_id from file_event_sync 
-	where sync_status = ? 
-	order by event_id desc 
-	limit 1`, ES_FETCHED).Scan(&eventId)
+	t := tx.Raw(`
+	SELECT event_id FROM file_event_sync 
+	WHERE sync_status = ? 
+	ORDER BY event_id DESC 
+	LIMIT 1
+	`, ES_FETCHED).Scan(&eventId)
 
 	if t.Error != nil {
-		return nil, t.Error
+		return -1, t.Error
 	}
-
-	// return nil if none is found
 	if t.RowsAffected < 1 {
-		return nil, nil
+		return -1, nil
 	}
 
-	return &eventId, nil
+	return eventId, nil
 }
 
 // verify whether the event is correctly applied, if so, ack it
-func ReAckEvent(eventId *int32) error {
+func ReAckEvent(eventId int) error {
 	// TODO impl this
 	return nil
 }
 
 // ack the event
-func AckEvent(eventId int32) error {
+func AckEvent(fileEvent client.FileEvent) error {
 	// TODO impl this
 	return nil
 }
 
-// fetch event detail
-func FetchEventDetail(eventId int32) (*FileEvent, error) {
-	// TODO impl this
-	return nil, nil
-}
-
 // fetch eventIds after the lastEventId
-func FetchEventIdsAfter(lastEventId int32) ([]int32, error) {
+func FetchEventIdsAfter(lastEventId int) ([]client.FileEvent, error) {
+
 	// TODO impl this
 	return nil, nil
 }
 
 // apply the FileEvent
-func ApplyFileEvent(eventId int32, fileEvent *FileEvent) error {
+func ApplyFileEvent(fileEvent client.FileEvent) error {
 	// TODO impl this
 	return nil
 }
@@ -147,7 +152,7 @@ func _syncFileInfoEventsInLock(syncFunc func(), mode AppMode) {
 		defer syncFileInfoEventsMutex.Unlock()
 		syncFunc()
 	} else {
-		redis.LockRun("fsf:sync", func() any {
+		gocommon.LockRun("fsf:sync:file", func() any {
 			syncFunc()
 			return nil
 		})
@@ -169,14 +174,14 @@ func _doSyncFileInfoEvents() {
 	var err error = nil
 	lastNonAckedEventId, err := FindLastNonAckedEventId()
 	if err != nil {
-		logrus.Errorf("Failed to FindLastNonAckedEventId, eventId: %d, %v", *lastNonAckedEventId, err)
+		logrus.Errorf("Failed to FindLastNonAckedEventId, %v", err)
 		return
 	}
-	if lastNonAckedEventId != nil {
+	if lastNonAckedEventId > -1 {
 		// try to verify and re-ack the event
 		err = ReAckEvent(lastNonAckedEventId)
 		if err != nil {
-			logrus.Errorf("Failed to ReAckEvent, eventId: %d, %v", *lastNonAckedEventId, err)
+			logrus.Errorf("Failed to ReAckEvent, eventId: %d, %v", lastNonAckedEventId, err)
 			return
 		}
 	} else {
@@ -198,42 +203,60 @@ func _doSyncFileInfoEvents() {
 	for {
 
 		// request more events from file-server, file-server may response list of eventIds after the lastEventId we have here
-		newEventIds, err := FetchEventIdsAfter(lastEventId)
+		fileEvents, err := FetchEventIdsAfter(lastEventId)
 		if err != nil {
 			logrus.Errorf("Failed to FetchEventIdsAfter, lastEventId: %d, %v", lastEventId, err)
 			return
 		}
 
-		// no more new events
-		if newEventIds == nil || len(newEventIds) < 1 {
-			return
+		// no more new events, break the method
+		if len(fileEvents) < 1 {
+			break
 		}
 
 		// based on the list of eventIds we got, we request detail for each of these eventId, and we apply them one by one
-		for _, i := range newEventIds {
-			var cei int32 = newEventIds[i]
-			logrus.Infof("Fetching detail of eventId: %d", cei)
-			fileEvent, err := FetchEventDetail(cei)
+		for _, fe := range fileEvents {
+			logrus.Infof("Handling FileEvent, eventId: %d", fe.EventId)
+
+			// apply the file event, repeatable action
+			err = ApplyFileEvent(fe)
 			if err != nil {
-				logrus.Errorf("Failed to FetchEventDetail, eventId: %d, %v", cei, err)
+				logrus.Errorf("Failed to ApplyFileEvent, eventId: %d, %v", fe.EventId, err)
 				return
 			}
 
-			if fileEvent != nil {
-				// apply the file event, repeatable action
-				err = ApplyFileEvent(cei, fileEvent)
-				if err != nil {
-					logrus.Errorf("Failed to ApplyFileEvent, eventId: %d, %v", cei, err)
-					return
-				}
-
-				// the event has been applied, we now ack it, repeatable action
-				err = AckEvent(cei)
-				if err != nil {
-					logrus.Errorf("Failed to AckEvent, eventId: %d, %v", cei, err)
-					return
-				}
+			// the event has been applied, we now ack it, repeatable action
+			err = AckEvent(fe)
+			if err != nil {
+				logrus.Errorf("Failed to AckEvent, eventId: %d, %v", fe.EventId, err)
+				return
 			}
 		}
 	}
+}
+
+// Create schema if absent
+func InitSchema() error {
+	return gocommon.GetSqlite().Transaction(func(tx *gorm.DB) error {
+		if e := tx.Exec(`
+		CREATE TABLE IF NOT EXISTS file_event_sync (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			event_id INTEGER NOT NULL DEFAULT '0',
+			file_key VARCHAR(64) NOT NULL,
+			sync_status VARCHAR(10) NOT NULL DEFAULT 'FETCHED',
+			fetch_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			ack_time TIMESTAMP NULL DEFAULT NULL
+		)
+		`).Error; e != nil {
+			return e
+		}
+
+		if e := tx.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS event_id_uk ON file_event_sync (event_id)
+		`).Error; e != nil {
+			return e
+		}
+
+		return nil
+	})
 }

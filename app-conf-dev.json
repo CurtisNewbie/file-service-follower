@@ -1,23 +1,12 @@
 {
-  "db": {
-    "enabled": true,
-    "user": "root",
-    "database": "file_service_follower",
-    "host": "localhost",
-    "port": "3306"
-  },
-  "redis": {
-    "enabled": true,
-    "address": "localhost",
-    "port": "6379",
-    "username": "",
-    "password": "",
-    "database": 0
+  "sqlite": {
+    "file": "fsf.db"
   },
   "file": {
     "base": "fsf-base"
   },
   "client": {
-    "fileServiceUrl": "http://localhost:8080"
+    "fileServiceUrl": "http://localhost:8080",
+    "secret": "123456"
   }
 }
