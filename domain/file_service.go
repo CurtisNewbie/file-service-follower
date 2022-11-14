@@ -113,8 +113,7 @@ func DownloadSyncFile(req SyncFileInfoReq, absPath string) error {
 	if url, e = buildFileServiceUrl("/open/api/sync/file/download"); e != nil {
 		return e
 	}
-
-	logrus.Infof("DownloadSyncFile, url: %s", url)
+	logrus.Infof("Requesting: %s", url)
 
 	var payload []byte
 	if payload, e = json.Marshal(req); e != nil {
@@ -153,8 +152,7 @@ func FetchSyncFileInfo(req SyncFileInfoReq) (*SyncFileInfoResp, error) {
 	if e != nil {
 		return nil, e
 	}
-
-	logrus.Infof("FetchSyncFileInfo, url: %s", url)
+	logrus.Infof("Requesting: %s", url)
 
 	payload, e := json.Marshal(req)
 	if e != nil {
@@ -195,8 +193,7 @@ func PollEvents(req PollEventReq) (*PollEventResp, error) {
 	if e != nil {
 		return nil, e
 	}
-
-	logrus.Infof("Poll events, url: %s", url)
+	logrus.Infof("Requesting: %s", url)
 
 	payload, e := json.Marshal(req)
 	if e != nil {

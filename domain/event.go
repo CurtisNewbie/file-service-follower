@@ -13,11 +13,13 @@ import (
 // event sync status
 type ESStatus string
 
-// app mode (server / standalone)
-//
-// if server mode is selected, then redis must be deployed for distributed locking
-//
-// if standalone mode is selected, then it will simply used mutex lock for syncing
+/*
+	App mode (server / standalone)
+
+	if server mode is selected, then redis must be deployed for distributed locking
+
+	if standalone mode is selected, then it will simply used mutex lock for syncing
+*/
 type AppMode string
 
 var (
@@ -56,6 +58,8 @@ const (
 
 	// AppMode: cluster mode
 	AM_CLUSTER AppMode = "CLUSTER"
+
+	PROP_FILE_BASE = "file.base"
 )
 
 // file event synchronization and acknowledgement
@@ -171,8 +175,7 @@ func ApplyAndAckEvent(eventId int, fileKey string, eventType string) error {
 
 // ack the event
 func AckEvent(eventId int) error {
-	// TODO impl this
-	return nil
+	return gocommon.GetSqlite().Exec("UPDATE file_event_sync SET sync_status = ?", ES_ACKED).Error
 }
 
 // fetch eventIds after the lastEventId
@@ -286,21 +289,21 @@ func _doSyncFileInfoEvents() {
 func InitSchema() error {
 	return gocommon.GetSqlite().Transaction(func(tx *gorm.DB) error {
 		if e := tx.Exec(`
-		CREATE TABLE IF NOT EXISTS file_event_sync (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			event_id INTEGER NOT NULL DEFAULT '0',
-			file_key VARCHAR(64) NOT NULL,
-			event_type VARCHAR(25) NOT NULL,
-			sync_status VARCHAR(10) NOT NULL DEFAULT 'FETCHED',
-			fetch_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			ack_time TIMESTAMP NULL DEFAULT NULL
-		)
+			CREATE TABLE IF NOT EXISTS file_event_sync (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				event_id INTEGER NOT NULL DEFAULT '0',
+				file_key VARCHAR(64) NOT NULL,
+				event_type VARCHAR(25) NOT NULL,
+				sync_status VARCHAR(10) NOT NULL DEFAULT 'FETCHED',
+				fetch_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				ack_time TIMESTAMP NULL DEFAULT NULL
+			)
 		`).Error; e != nil {
 			return e
 		}
 
 		if e := tx.Exec(`
-		CREATE UNIQUE INDEX IF NOT EXISTS event_id_uk ON file_event_sync (event_id)
+			CREATE UNIQUE INDEX IF NOT EXISTS event_id_uk ON file_event_sync (event_id)
 		`).Error; e != nil {
 			return e
 		}
@@ -311,12 +314,16 @@ func InitSchema() error {
 
 // Resolve file path
 func resolveFilePath(fileKey string) string {
-	// TODO impl
+	base := gocommon.GetPropStr(PROP_FILE_BASE)
+	if base == "" {
+		logrus.Fatalf("Unable to resolve base path, missing property: '%s'", PROP_FILE_BASE)
+	}
 	return ""
 }
 
 // Save event
 func SaveEvent(fe FileEvent) error {
-	// TODO impl
-	return nil
+	return gocommon.GetSqlite().Exec(`
+		INSERT OR IGNORE file_event_sync (event_id, file_key, event_type, sync_status) VALUES (?, ?, ?, ?)
+	`, fe.EventId, fe.FileKey, fe.Type, ES_FETCHED).Error
 }
