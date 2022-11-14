@@ -1,4 +1,4 @@
-package client
+package domain
 
 import (
 	"bytes"
@@ -27,8 +27,27 @@ const (
 	// EventType: file deleted
 	ET_FILE_DELETED EventType = "DELETED"
 
+	/*
+		--------------------------------
+
+		Props
+
+		--------------------------------
+	*/
 	PROP_SYNC_SECRET      = "client.secret"
 	PROP_FILE_SERVICE_URL = "client.fileServiceUrl"
+
+	/*
+		--------------------------------
+
+		File Type
+
+		--------------------------------
+	*/
+	// FileType file
+	FT_FILE FileType = "FILE"
+	// FileType directory
+	FT_DIR FileType = "DIR"
 )
 
 var (
@@ -36,13 +55,16 @@ var (
 	ErrMissingUrl    = errors.New("missing client.fileServiceUrl configuration, unable to resolve base url for file-service")
 )
 
-// event type
+// Event type
 type EventType string
 
-// file event
+// File type
+type FileType string
+
+// File event
 type FileEvent struct {
 	EventId int       `json:"Id"`
-	Type    EventType `json:"type"`
+	Type    string `json:"type"`
 	FileKey string
 }
 
@@ -64,7 +86,7 @@ type SyncFileInfoReq struct {
 
 type SyncFileInfoResp struct {
 	gocommon.Resp
-	Data FileInfo `json:"data"`
+	Data *FileInfo `json:"data"`
 }
 
 type FileInfo struct {

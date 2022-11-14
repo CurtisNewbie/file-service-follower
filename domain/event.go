@@ -1,10 +1,10 @@
 package domain
 
 import (
+	"os"
 	"sync"
 	"time"
 
-	"github.com/curtisnewbie/file-service-follower/client"
 	"github.com/curtisnewbie/gocommon"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
@@ -63,6 +63,7 @@ type FileEventSync struct {
 	Id         int
 	EventId    int
 	FileKey    string
+	EventType  string
 	SyncStatus ESStatus
 	FetchTime  time.Time
 	AckTime    time.Time
@@ -97,52 +98,90 @@ func FindLastEventId() (int, error) {
 	return eventId, nil
 }
 
-// find last fetched eventId, if none is found, -1is returned
-func FindLastNonAckedEventId() (int, error) {
+// Find last fetched eventId, if none is found, a FileEventSync with 'zero value' is returned
+func FindLastNonAckedEvent() (FileEventSync, error) {
 	tx := gocommon.GetSqlite()
 
-	eventId := -1
-
+	var fes FileEventSync
 	t := tx.Raw(`
-	SELECT event_id FROM file_event_sync 
+	SELECT * FROM file_event_sync 
 	WHERE sync_status = ? 
 	ORDER BY event_id DESC 
 	LIMIT 1
-	`, ES_FETCHED).Scan(&eventId)
+	`, ES_FETCHED).Scan(&fes)
 
 	if t.Error != nil {
-		return -1, t.Error
+		return fes, t.Error
 	}
 	if t.RowsAffected < 1 {
-		return -1, nil
+		return fes, nil
 	}
 
-	return eventId, nil
+	return fes, nil
 }
 
-// verify whether the event is correctly applied, if so, ack it
-func ReAckEvent(eventId int) error {
-	// TODO impl this
-	return nil
+/*
+	Apply and ack event
+
+	This func always tries to apply the event and ack it as if it
+	has never been applied before. Even if it found the file on disk,
+	the downloading may have been corrupted, the file is always truncated
+	and re-downloaded.
+*/
+func ApplyAndAckEvent(eventId int, fileKey string, eventType string) error {
+	// fetch file info from file-server
+	sf, e := FetchSyncFileInfo(SyncFileInfoReq{FileKey: fileKey})
+	if e != nil {
+		return e
+	}
+
+	// the file may have been deleted
+	if sf.Data == nil {
+		logrus.Infof("File for eventId '%d' has been deleted, resp.data=nil, acking event", eventId)
+		return AckEvent(eventId)
+	}
+
+	// we only handle FILE_ADDED event type for now
+	if eventType != string(ET_FILE_ADDED) {
+		return AckEvent(eventId)
+	}
+
+	// the file is a directory, ack it directly
+	if *sf.Data.FileType == string(FT_DIR) {
+		logrus.Infof("File for eventId '%d' is a DIR, acking event", eventId)
+		return AckEvent(eventId)
+	}
+
+	// we always choose to overwrite the regardless of whether the file exists beforehand
+	path := resolveFilePath(fileKey)
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		logrus.Warnf("Failed to close file, path: '%s'", path)
+	}
+
+	// download file and ack event
+	if err := DownloadSyncFile(SyncFileInfoReq{FileKey: fileKey}, path); err != nil {
+		return err
+	}
+	return AckEvent(eventId)
 }
 
 // ack the event
-func AckEvent(fileEvent client.FileEvent) error {
+func AckEvent(eventId int) error {
 	// TODO impl this
 	return nil
 }
 
 // fetch eventIds after the lastEventId
-func FetchEventIdsAfter(lastEventId int) ([]client.FileEvent, error) {
-
-	// TODO impl this
-	return nil, nil
-}
-
-// apply the FileEvent
-func ApplyFileEvent(fileEvent client.FileEvent) error {
-	// TODO impl this
-	return nil
+func FetchEventIdsAfter(lastEventId int) ([]FileEvent, error) {
+	resp, e := PollEvents(PollEventReq{})
+	if e != nil {
+		return []FileEvent{}, e
+	}
+	return resp.Data, e
 }
 
 // same as doSyncFileInfoEvents(), except that we wrap it with a lock
@@ -172,16 +211,24 @@ func _doSyncFileInfoEvents() {
 		that it's correctly applied before we ack it and fetch more events
 	*/
 	var err error = nil
-	lastNonAckedEventId, err := FindLastNonAckedEventId()
+	lastNonAckedEvent, err := FindLastNonAckedEvent()
 	if err != nil {
 		logrus.Errorf("Failed to FindLastNonAckedEventId, %v", err)
 		return
 	}
-	if lastNonAckedEventId > -1 {
-		// try to verify and re-ack the event
-		err = ReAckEvent(lastNonAckedEventId)
+	if !lastNonAckedEvent.isZero() {
+		/*
+			Try to verify and re-ack the event
+
+			Normally events are acked right after being fetched, if we find a event
+			that is not acked, the file downloading may have failed.
+
+			- If the file is not downloaded at all, we try to download it.
+			- If a file is found in the dir, it may be corrupted, overwrite it.
+		*/
+		err = ApplyAndAckEvent(lastNonAckedEvent.EventId, lastNonAckedEvent.FileKey, lastNonAckedEvent.EventType)
 		if err != nil {
-			logrus.Errorf("Failed to ReAckEvent, eventId: %d, %v", lastNonAckedEventId, err)
+			logrus.Errorf("Failed to re-ack event, eventId: %d, %v", lastNonAckedEvent.EventId, err)
 			return
 		}
 	} else {
@@ -218,19 +265,19 @@ func _doSyncFileInfoEvents() {
 		for _, fe := range fileEvents {
 			logrus.Infof("Handling FileEvent, eventId: %d", fe.EventId)
 
-			// apply the file event, repeatable action
-			err = ApplyFileEvent(fe)
+			err = SaveEvent(fe)
+			if err != nil {
+				logrus.Errorf("Failed to SaveEvent, eventId: %d, %v", fe.EventId, err)
+				return
+			}
+
+			// apply the file event
+			err = ApplyAndAckEvent(fe.EventId, fe.FileKey, fe.Type)
 			if err != nil {
 				logrus.Errorf("Failed to ApplyFileEvent, eventId: %d, %v", fe.EventId, err)
 				return
 			}
-
-			// the event has been applied, we now ack it, repeatable action
-			err = AckEvent(fe)
-			if err != nil {
-				logrus.Errorf("Failed to AckEvent, eventId: %d, %v", fe.EventId, err)
-				return
-			}
+			logrus.Infof("Successfully applied and acked event, eventId: %d", fe.EventId)
 		}
 	}
 }
@@ -243,6 +290,7 @@ func InitSchema() error {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			event_id INTEGER NOT NULL DEFAULT '0',
 			file_key VARCHAR(64) NOT NULL,
+			event_type VARCHAR(25) NOT NULL,
 			sync_status VARCHAR(10) NOT NULL DEFAULT 'FETCHED',
 			fetch_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			ack_time TIMESTAMP NULL DEFAULT NULL
@@ -259,4 +307,16 @@ func InitSchema() error {
 
 		return nil
 	})
+}
+
+// Resolve file path
+func resolveFilePath(fileKey string) string {
+	// TODO impl
+	return ""
+}
+
+// Save event
+func SaveEvent(fe FileEvent) error {
+	// TODO impl
+	return nil
 }
