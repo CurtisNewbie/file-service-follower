@@ -129,8 +129,8 @@ func FindLastNonAckedEvent() (FileEventSync, error) {
 
 	This func always tries to apply the event and ack it as if it
 	has never been applied before. Even if it found the file on disk,
-	the downloading may have been corrupted, the file is always truncated
-	and re-downloaded.
+	the downloaded file may be imcomplete or corrupted, the file is 
+	always truncated and re-downloaded.
 */
 func ApplyAndAckEvent(eventId int, fileKey string, eventType string) error {
 	// fetch file info from file-server
