@@ -63,9 +63,9 @@ type FileType string
 
 // File event
 type FileEvent struct {
-	EventId int       `json:"Id"`
+	EventId int    `json:"eventId"`
 	Type    string `json:"type"`
-	FileKey string
+	FileKey string `json:"fileKey"`
 }
 
 type PollEventReq struct {

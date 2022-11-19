@@ -17,6 +17,6 @@ func main() {
 		panic(e)
 	}
 
-	s := gocommon.ScheduleCron("0/3 * * * * *", func() { domain.SyncFileInfoEvents(mode) })
+	s := gocommon.ScheduleCron("0/5 * * * * *", func() { domain.SyncFileInfoEvents(mode) })
 	s.StartBlocking()
 }

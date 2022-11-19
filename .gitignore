@@ -15,3 +15,6 @@
 # vendor/
 
 fsf.db
+fsf-base/
+.vscode/
+.DS_Store

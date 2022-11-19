@@ -129,7 +129,7 @@ func FindLastNonAckedEvent() (FileEventSync, error) {
 
 	This func always tries to apply the event and ack it as if it
 	has never been applied before. Even if it found the file on disk,
-	the downloaded file may be imcomplete or corrupted, the file is 
+	the downloaded file may be imcomplete or corrupted, the file is
 	always truncated and re-downloaded.
 */
 func ApplyAndAckEvent(eventId int, fileKey string, eventType string) error {
@@ -180,7 +180,7 @@ func AckEvent(eventId int) error {
 
 // fetch eventIds after the lastEventId
 func FetchEventIdsAfter(lastEventId int) ([]FileEvent, error) {
-	resp, e := PollEvents(PollEventReq{})
+	resp, e := PollEvents(PollEventReq{EventId: lastEventId, Limit: 30})
 	if e != nil {
 		return []FileEvent{}, e
 	}
@@ -238,19 +238,18 @@ func _doSyncFileInfoEvents() {
 		logrus.Infof("No non-acked eventId found")
 	}
 
-	/*
-		try to find the last eventId, we use it as an offset to fetch more eventIds after it,
-		by default it's 0, and file-server should recognize it.
-	*/
-	lastEventId, err := FindLastEventId()
-	if err != nil {
-		logrus.Errorf("Failed to find last eventId, %v", err)
-		return
-	}
-	logrus.Infof("Last eventId: %d, tries to fetch more", lastEventId)
-
 	// keep fetching until we got all of them
 	for {
+		/*
+			try to find the last eventId, we use it as an offset to fetch more eventIds after it,
+			by default it's 0, and file-server should recognize it.
+		*/
+		lastEventId, err := FindLastEventId()
+		if err != nil {
+			logrus.Errorf("Failed to find last eventId, %v", err)
+			return
+		}
+		logrus.Infof("Last eventId: %d, tries to fetch more", lastEventId)
 
 		// request more events from file-server, file-server may response list of eventIds after the lastEventId we have here
 		fileEvents, err := FetchEventIdsAfter(lastEventId)
@@ -318,12 +317,12 @@ func resolveFilePath(fileKey string) string {
 	if base == "" {
 		logrus.Fatalf("Unable to resolve base path, missing property: '%s'", PROP_FILE_BASE)
 	}
-	return ""
+	return base + "/" + fileKey
 }
 
 // Save event
 func SaveEvent(fe FileEvent) error {
 	return gocommon.GetSqlite().Exec(`
-		INSERT OR IGNORE file_event_sync (event_id, file_key, event_type, sync_status) VALUES (?, ?, ?, ?)
+		INSERT OR IGNORE INTO file_event_sync (event_id, file_key, event_type, sync_status) VALUES (?, ?, ?, ?)
 	`, fe.EventId, fe.FileKey, fe.Type, ES_FETCHED).Error
 }
