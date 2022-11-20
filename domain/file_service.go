@@ -9,7 +9,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/curtisnewbie/gocommon"
+	"github.com/curtisnewbie/gocommon/common"
 	"github.com/sirupsen/logrus"
 )
 
@@ -75,7 +75,7 @@ type PollEventReq struct {
 }
 
 type PollEventResp struct {
-	gocommon.Resp
+	common.Resp
 	Data []FileEvent `json:"data"`
 }
 
@@ -85,7 +85,7 @@ type SyncFileInfoReq struct {
 }
 
 type SyncFileInfoResp struct {
-	gocommon.Resp
+	common.Resp
 	Data *FileInfo `json:"data"`
 }
 
@@ -103,7 +103,7 @@ type FileInfo struct {
 
 // Fetch info of the file
 func DownloadSyncFile(req SyncFileInfoReq, absPath string) error {
-	req.Secret = gocommon.GetPropStr(PROP_SYNC_SECRET)
+	req.Secret = common.GetPropStr(PROP_SYNC_SECRET)
 	if req.Secret == "" {
 		return ErrMissingSecret
 	}
@@ -143,7 +143,7 @@ func DownloadSyncFile(req SyncFileInfoReq, absPath string) error {
 
 // Fetch info of the file
 func FetchSyncFileInfo(req SyncFileInfoReq) (*SyncFileInfoResp, error) {
-	req.Secret = gocommon.GetPropStr(PROP_SYNC_SECRET)
+	req.Secret = common.GetPropStr(PROP_SYNC_SECRET)
 	if req.Secret == "" {
 		return nil, ErrMissingSecret
 	}
@@ -177,14 +177,14 @@ func FetchSyncFileInfo(req SyncFileInfoReq) (*SyncFileInfoResp, error) {
 	}
 
 	if resp.Resp.Error {
-		return nil, gocommon.NewWebErr(resp.Resp.Msg)
+		return nil, common.NewWebErr(resp.Resp.Msg)
 	}
 	return &resp, nil
 }
 
 // Poll Events
 func PollEvents(req PollEventReq) (*PollEventResp, error) {
-	req.Secret = gocommon.GetPropStr(PROP_SYNC_SECRET)
+	req.Secret = common.GetPropStr(PROP_SYNC_SECRET)
 	if req.Secret == "" {
 		return nil, ErrMissingSecret
 	}
@@ -218,7 +218,7 @@ func PollEvents(req PollEventReq) (*PollEventResp, error) {
 	}
 
 	if resp.Resp.Error {
-		return nil, gocommon.NewWebErr(resp.Resp.Msg)
+		return nil, common.NewWebErr(resp.Resp.Msg)
 	}
 	return &resp, nil
 
@@ -230,7 +230,7 @@ func buildFileServiceUrl(relUrl string) (string, error) {
 		relUrl = "/" + relUrl
 	}
 
-	baseUrl := gocommon.GetPropStr(PROP_FILE_SERVICE_URL)
+	baseUrl := common.GetPropStr(PROP_FILE_SERVICE_URL)
 	if baseUrl == "" {
 		return "", ErrMissingUrl
 	}

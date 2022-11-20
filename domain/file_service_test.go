@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/curtisnewbie/gocommon"
+	"github.com/curtisnewbie/gocommon/common"
 )
 
 func preTest() {
-	gocommon.SetProp(PROP_FILE_SERVICE_URL, "http://localhost:8080")
-	gocommon.SetProp(PROP_SYNC_SECRET, "123456")
+	common.SetProp(PROP_FILE_SERVICE_URL, "http://localhost:8080")
+	common.SetProp(PROP_SYNC_SECRET, "123456")
 }
 
 func TestDownloadSyncFile(t *testing.T) {

@@ -1,11 +1,14 @@
 package domain
 
 import (
+	"errors"
 	"os"
 	"sync"
 	"time"
 
-	"github.com/curtisnewbie/gocommon"
+	"github.com/curtisnewbie/gocommon/common"
+	"github.com/curtisnewbie/gocommon/redis"
+	"github.com/curtisnewbie/gocommon/sqlite"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
@@ -75,7 +78,7 @@ type FileEventSync struct {
 	CreateBy   string
 	UpdateTime time.Time
 	UpdateBy   string
-	IsDel      gocommon.IS_DEL
+	IsDel      common.IS_DEL
 }
 
 func (fes FileEventSync) isZero() bool {
@@ -84,7 +87,7 @@ func (fes FileEventSync) isZero() bool {
 
 // find last eventId, if none is found, 0 is returned
 func FindLastEventId() (int, error) {
-	tx := gocommon.GetSqlite()
+	tx := sqlite.GetSqlite()
 
 	// 0 is the default value, it's also the first eventId used when we don't have any
 	var eventId int
@@ -104,7 +107,7 @@ func FindLastEventId() (int, error) {
 
 // Find last fetched eventId, if none is found, a FileEventSync with 'zero value' is returned
 func FindLastNonAckedEvent() (FileEventSync, error) {
-	tx := gocommon.GetSqlite()
+	tx := sqlite.GetSqlite()
 
 	var fes FileEventSync
 	t := tx.Raw(`
@@ -145,11 +148,21 @@ func ApplyAndAckEvent(eventId int, fileKey string, eventType string) error {
 		return AckEvent(eventId)
 	}
 
-	// we only handle FILE_ADDED event type for now
+	// file deleted
+	if eventType == string(ET_FILE_DELETED) {
+		if e := deleteFileIfPresent(fileKey); e != nil {
+			return e
+		}
+		return AckEvent(eventId)
+	}
+
+
+	// other events
 	if eventType != string(ET_FILE_ADDED) {
 		return AckEvent(eventId)
 	}
 
+	// handle file added events
 	// the file is a directory, ack it directly
 	if *sf.Data.FileType == string(FT_DIR) {
 		logrus.Infof("File for eventId '%d' is a DIR, acking event", eventId)
@@ -173,9 +186,21 @@ func ApplyAndAckEvent(eventId int, fileKey string, eventType string) error {
 	return AckEvent(eventId)
 }
 
+// Delete file if present
+func deleteFileIfPresent(fileKey string) error {
+	fpath := resolveFilePath(fileKey)
+
+	// file doesn't exist
+	if _, err := os.Stat(fpath); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+
+	return os.Remove(fpath)
+}
+
 // ack the event
 func AckEvent(eventId int) error {
-	return gocommon.GetSqlite().Exec("UPDATE file_event_sync SET sync_status = ?", ES_ACKED).Error
+	return sqlite.GetSqlite().Exec("UPDATE file_event_sync SET sync_status = ?", ES_ACKED).Error
 }
 
 // fetch eventIds after the lastEventId
@@ -194,7 +219,7 @@ func _syncFileInfoEventsInLock(syncFunc func(), mode AppMode) {
 		defer syncFileInfoEventsMutex.Unlock()
 		syncFunc()
 	} else {
-		gocommon.LockRun("fsf:sync:file", func() any {
+		redis.RLockRun("fsf:sync:file", func() any {
 			syncFunc()
 			return nil
 		})
@@ -286,7 +311,7 @@ func _doSyncFileInfoEvents() {
 
 // Create schema if absent
 func InitSchema() error {
-	return gocommon.GetSqlite().Transaction(func(tx *gorm.DB) error {
+	return sqlite.GetSqlite().Transaction(func(tx *gorm.DB) error {
 		if e := tx.Exec(`
 			CREATE TABLE IF NOT EXISTS file_event_sync (
 				id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -313,7 +338,7 @@ func InitSchema() error {
 
 // Resolve file path
 func resolveFilePath(fileKey string) string {
-	base := gocommon.GetPropStr(PROP_FILE_BASE)
+	base := common.GetPropStr(PROP_FILE_BASE)
 	if base == "" {
 		logrus.Fatalf("Unable to resolve base path, missing property: '%s'", PROP_FILE_BASE)
 	}
@@ -322,7 +347,7 @@ func resolveFilePath(fileKey string) string {
 
 // Save event
 func SaveEvent(fe FileEvent) error {
-	return gocommon.GetSqlite().Exec(`
+	return sqlite.GetSqlite().Exec(`
 		INSERT OR IGNORE INTO file_event_sync (event_id, file_key, event_type, sync_status) VALUES (?, ?, ?, ?)
 	`, fe.EventId, fe.FileKey, fe.Type, ES_FETCHED).Error
 }
