@@ -3,7 +3,7 @@ module github.com/curtisnewbie/file-service-follower
 go 1.18
 
 require (
-	github.com/curtisnewbie/gocommon v0.0.0-20221119164113-91bdccd63f88
+	github.com/curtisnewbie/gocommon v0.0.0-20221120154325-fd664a393dad
 	github.com/sirupsen/logrus v1.9.0
 	gorm.io/gorm v1.23.8
 )
