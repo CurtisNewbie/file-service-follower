@@ -200,7 +200,7 @@ func deleteFileIfPresent(fileKey string) error {
 
 // ack the event
 func AckEvent(eventId int) error {
-	return sqlite.GetSqlite().Exec("UPDATE file_event_sync SET sync_status = ?", ES_ACKED).Error
+	return sqlite.GetSqlite().Exec("UPDATE file_event_sync SET sync_status = ?, ack_time = ? where event_id = ?", ES_ACKED, time.Now(), eventId).Error
 }
 
 // fetch eventIds after the lastEventId
