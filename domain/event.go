@@ -149,13 +149,12 @@ func ApplyAndAckEvent(eventId int, fileKey string, eventType string) error {
 	}
 
 	// file deleted
-	if eventType == string(ET_FILE_DELETED) {
+	if eventType == string(ET_FILE_DELETED) || (sf.Data.IsDeleted != nil && *sf.Data.IsDeleted) {
 		if e := deleteFileIfPresent(fileKey); e != nil {
 			return e
 		}
 		return AckEvent(eventId)
 	}
-
 
 	// other events
 	if eventType != string(ET_FILE_ADDED) {
